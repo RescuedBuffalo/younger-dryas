@@ -118,6 +118,15 @@ class GameState:
         if hex_data.owner is not None:
             return False
             
+        # If player has no settlements yet, they can claim any hex
+        has_any_settlement = any(
+            self.get_hex_data(c, r).improvement == ImprovementType.SETTLEMENT
+            for c, r in self.current_player.owned_hexes
+        )
+        
+        if not has_any_settlement:
+            return True
+            
         # Must have a settlement within 2 hexes
         for dc in range(-2, 3):
             for dr in range(-2, 3):
@@ -176,15 +185,54 @@ class GameState:
     def can_build(self, col: int, row: int, improvement: ImprovementType) -> bool:
         """Check if current player can build the improvement here"""
         hex_data = self.get_hex_data(col, row)
-        return (hex_data.owner == self.current_player.id and
-                hex_data.can_build(improvement) and
-                self.current_player.can_afford(self.IMPROVEMENT_COSTS[improvement]))
+        
+        # Basic checks
+        if (hex_data.owner != self.current_player.id or
+            not hex_data.can_build(improvement) or
+            not self.current_player.can_afford(self.IMPROVEMENT_COSTS[improvement])):
+            return False
+            
+        # Special case for first settlement
+        if improvement == ImprovementType.SETTLEMENT:
+            has_any_settlement = any(
+                self.get_hex_data(c, r).improvement == ImprovementType.SETTLEMENT
+                for c, r in self.current_player.owned_hexes
+            )
+            if not has_any_settlement:
+                return True
+            
+            # For subsequent settlements, must be at least 4 hexes away from other settlements
+            for c, r in self.current_player.owned_hexes:
+                if self.get_hex_data(c, r).improvement == ImprovementType.SETTLEMENT:
+                    dx = abs(col - c)
+                    dy = abs(row - r)
+                    if dx + dy < 4:
+                        return False
+        
+        return True
     
     def build_improvement(self, col: int, row: int, improvement: ImprovementType) -> bool:
         """Attempt to build an improvement on the hex"""
         if not self.can_build(col, row, improvement):
+            reason = ""
+            hex_data = self.get_hex_data(col, row)
+            
+            if hex_data.owner != self.current_player.id:
+                reason = "must own the hex"
+            elif not hex_data.can_build(improvement):
+                reason = "hex already has an improvement"
+            elif not self.current_player.can_afford(self.IMPROVEMENT_COSTS[improvement]):
+                reason = "insufficient resources"
+            elif improvement == ImprovementType.SETTLEMENT:
+                has_any_settlement = any(
+                    self.get_hex_data(c, r).improvement == ImprovementType.SETTLEMENT
+                    for c, r in self.current_player.owned_hexes
+                )
+                if has_any_settlement:
+                    reason = "too close to another settlement"
+            
             self.log_action(
-                f"Failed to build {improvement.value} at ({col}, {row})",
+                f"Failed to build {improvement.value} at ({col}, {row}) - {reason}",
                 GameAction.BUILD_IMPROVEMENT,
                 {"col": col, "row": row, "improvement": improvement.value, "success": False}
             )
