@@ -1,0 +1,6 @@
+documentation/
+.cursor/
+venv/
+__pycache__/
+.DS_Store
+.vscode/
