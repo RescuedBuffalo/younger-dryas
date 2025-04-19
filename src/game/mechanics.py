@@ -76,6 +76,19 @@ class GameState:
         }
     }
     
+    # Points awarded for different achievements
+    POINTS_PER_HEX = 1
+    POINTS_PER_IMPROVEMENT = {
+        ImprovementType.FARM: 2,
+        ImprovementType.LUMBER_CAMP: 2,
+        ImprovementType.QUARRY: 3,
+        ImprovementType.SETTLEMENT: 5
+    }
+    
+    # Victory conditions
+    POINTS_TO_WIN = 3  # Lowered from 30 for testing
+    MAX_TURNS = 20  # Game ends after this many turns
+    
     # Resource generation per improvement per turn
     RESOURCE_GENERATION = {
         ImprovementType.FARM: {ResourceType.FOOD: 2},
@@ -96,6 +109,8 @@ class GameState:
         self.turn_number = 1
         self.action_log: List[str] = []  # Human-readable log
         self.game_events: List[GameEvent] = []  # Machine-readable events
+        self.game_over = False
+        self.winner = None
         
     @property
     def current_player(self) -> Player:
@@ -161,6 +176,9 @@ class GameState:
     
     def claim_hex(self, col: int, row: int) -> bool:
         """Attempt to claim a hex for the current player"""
+        if self.game_over:
+            return False
+            
         if not self.can_claim_hex(col, row):
             self.log_action(
                 f"Failed to claim hex at ({col}, {row})" + 
@@ -213,6 +231,9 @@ class GameState:
     
     def build_improvement(self, col: int, row: int, improvement: ImprovementType) -> bool:
         """Attempt to build an improvement on the hex"""
+        if self.game_over:
+            return False
+            
         if not self.can_build(col, row, improvement):
             reason = ""
             hex_data = self.get_hex_data(col, row)
@@ -253,8 +274,47 @@ class GameState:
         )
         return True
     
+    def calculate_player_points(self, player: Player) -> int:
+        """Calculate points for a player based on territory and improvements"""
+        points = len(player.owned_hexes) * self.POINTS_PER_HEX
+        
+        # Add points for improvements
+        for col, row in player.owned_hexes:
+            hex_data = self.get_hex_data(col, row)
+            if hex_data.improvement:
+                points += self.POINTS_PER_IMPROVEMENT.get(hex_data.improvement, 0)
+                
+        return points
+    
+    def check_victory_conditions(self) -> Optional[Player]:
+        """Check if any player has won or if the game should end"""
+        # Check points victory
+        for player in self.players:
+            points = self.calculate_player_points(player)
+            if points >= self.POINTS_TO_WIN:
+                return player
+                
+        # Check turn limit
+        if self.turn_number >= self.MAX_TURNS:
+            # Find player with most points
+            max_points = -1
+            winner = None
+            for player in self.players:
+                points = self.calculate_player_points(player)
+                if points > max_points:
+                    max_points = points
+                    winner = player
+                elif points == max_points:
+                    winner = None  # Tie game
+            return winner
+            
+        return None
+        
     def end_turn(self):
         """End current player's turn and process turn effects"""
+        if self.game_over:
+            return
+            
         resources_gained = {}
         
         # Generate resources from improvements
@@ -276,4 +336,23 @@ class GameState:
         self.current_player.claims_this_turn = 0
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         if self.current_player_idx == 0:
-            self.turn_number += 1 
+            self.turn_number += 1
+            
+            # Check victory conditions at the end of each round
+            winner = self.check_victory_conditions()
+            if winner:
+                self.game_over = True
+                self.winner = winner
+                self.log_action(
+                    f"Game Over! Player {winner.id + 1} wins with {self.calculate_player_points(winner)} points!",
+                    GameAction.END_TURN,
+                    {"winner": winner.id, "points": self.calculate_player_points(winner)}
+                )
+            elif self.turn_number >= self.MAX_TURNS:
+                self.game_over = True
+                if not self.winner:
+                    self.log_action(
+                        "Game Over! It's a tie!",
+                        GameAction.END_TURN,
+                        {"winner": None}
+                    ) 

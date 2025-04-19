@@ -39,6 +39,10 @@ class GameEngine:
         self.action_buttons = self._create_action_buttons()
         self.escape_menu_buttons = self._create_escape_menu_buttons()
         
+        # Victory screen
+        self.victory_font = pygame.font.Font(None, 74)  # Large font for victory message
+        self.button_font = pygame.font.Font(None, 36)  # Smaller font for buttons
+        
     def _create_escape_menu_buttons(self) -> List[Dict]:
         """Create the escape menu buttons"""
         button_width = 200
@@ -118,8 +122,22 @@ class GameEngine:
         return (col % self.world.width, row % self.world.height)
         
     def handle_events(self):
-        # Update button hover states
+        # If game is over, only handle quit events and victory screen clicks
+        if self.game_state.game_over:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mouse_pos = pygame.mouse.get_pos()
+                    quit_button = self._get_victory_quit_button()
+                    if quit_button.collidepoint(mouse_pos):
+                        self.running = False
+            return
+            
+        # Regular game event handling
         mouse_pos = pygame.mouse.get_pos()
+        
+        # Update button hover states
         for button in self.action_buttons:
             button['hover'] = button['rect'].collidepoint(mouse_pos)
         if self.show_escape_menu:
@@ -406,6 +424,10 @@ class GameEngine:
         if self.show_escape_menu:
             self._render_escape_menu()
         
+        # Draw victory screen if game is over
+        if self.game_state.game_over:
+            self.render_victory_screen()
+        
         pygame.display.flip()
         
     def draw_improvement_icon(self, x: float, y: float, improvement: ImprovementType):
@@ -581,6 +603,48 @@ class GameEngine:
             text_rect = text.get_rect(center=button['rect'].center)
             self.screen.blit(text, text_rect)
         
+    def _get_victory_quit_button(self) -> pygame.Rect:
+        """Get the quit button rect for the victory screen"""
+        button_rect = pygame.Rect(0, 0, 200, 50)
+        button_rect.center = (self.screen_size[0] // 2, self.screen_size[1] // 2 + 100)
+        return button_rect
+
+    def render_victory_screen(self):
+        """Render the victory screen with darkened background"""
+        # Create a semi-transparent dark overlay
+        overlay = pygame.Surface(self.screen_size)
+        overlay.fill((0, 0, 0))
+        overlay.set_alpha(128)
+        self.screen.blit(overlay, (0, 0))
+        
+        # Render victory message
+        if self.game_state.winner:
+            message = f"Player {self.game_state.winner.id + 1} Wins!"
+            message_color = self.game_state.winner.color
+        else:
+            message = "It's a Tie!"
+            message_color = (255, 255, 255)
+            
+        text = self.victory_font.render(message, True, message_color)
+        text_rect = text.get_rect(center=(self.screen_size[0] // 2, self.screen_size[1] // 2 - 50))
+        self.screen.blit(text, text_rect)
+        
+        # Render points
+        if self.game_state.winner:
+            points = self.game_state.calculate_player_points(self.game_state.winner)
+            points_text = self.button_font.render(f"Points: {points}", True, message_color)
+            points_rect = points_text.get_rect(center=(self.screen_size[0] // 2, self.screen_size[1] // 2 + 20))
+            self.screen.blit(points_text, points_rect)
+        
+        # Render quit button
+        button_rect = self._get_victory_quit_button()
+        pygame.draw.rect(self.screen, (100, 100, 100), button_rect)
+        pygame.draw.rect(self.screen, (200, 200, 200), button_rect, 2)
+        
+        quit_text = self.button_font.render("Quit Game", True, (255, 255, 255))
+        quit_rect = quit_text.get_rect(center=button_rect.center)
+        self.screen.blit(quit_text, quit_rect)
+
     def run(self):
         while self.running:
             self.handle_events()
